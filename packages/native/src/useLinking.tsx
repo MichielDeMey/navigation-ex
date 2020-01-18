@@ -1,12 +1,12 @@
 import * as React from 'react';
-import { Linking } from 'react-native';
 import {
-  getActionFromState,
   getStateFromPath as getStateFromPathDefault,
+  getPathFromState as getPathFromStateDefault,
   NavigationContainerRef,
 } from '@react-navigation/core';
 
 type GetStateFromPath = typeof getStateFromPathDefault;
+type GetPathFromState = typeof getPathFromStateDefault;
 
 type Config = Parameters<GetStateFromPath>[1];
 
@@ -31,14 +31,23 @@ type Options = {
    */
   config?: Config;
   /**
-   * Custom function to parse the URL object to a valid navigation state (advanced).
+   * Custom function to parse the URL to a valid navigation state (advanced).
    */
   getStateFromPath?: GetStateFromPath;
+  /**
+   * Custom function to conver the state object to a valid URL (advanced).
+   */
+  getPathFromState?: GetPathFromState;
 };
 
 export default function useLinking(
   ref: React.RefObject<NavigationContainerRef>,
-  { prefixes, config, getStateFromPath = getStateFromPathDefault }: Options
+  {
+    prefixes,
+    config,
+    getStateFromPath = getStateFromPathDefault,
+    getPathFromState = getPathFromStateDefault,
+  }: Options
 ) {
   // We store these options in ref to avoid re-creating getInitialState and re-subscribing listeners
   // This lets user avoid wrapping the items in `React.useCallback` or `React.useMemo`
@@ -46,58 +55,75 @@ export default function useLinking(
   const prefixesRef = React.useRef(prefixes);
   const configRef = React.useRef(config);
   const getStateFromPathRef = React.useRef(getStateFromPath);
+  const getPathFromStateRef = React.useRef(getPathFromState);
 
   React.useEffect(() => {
     prefixesRef.current = prefixes;
     configRef.current = config;
     getStateFromPathRef.current = getStateFromPath;
-  }, [config, getStateFromPath, prefixes]);
+    getPathFromStateRef.current = getPathFromState;
+  }, [config, getPathFromState, getStateFromPath, prefixes]);
 
-  const extractPathFromURL = React.useCallback((url: string) => {
-    for (const prefix of prefixesRef.current) {
-      if (url.startsWith(prefix)) {
-        return url.replace(prefix, '');
-      }
-    }
-
-    return undefined;
-  }, []);
-
-  const getInitialState = React.useCallback(async () => {
-    const url = await Linking.getInitialURL();
-    const path = url ? extractPathFromURL(url) : null;
+  const getInitialState = React.useCallback(() => {
+    const path = location.pathname + location.search;
 
     if (path) {
       return getStateFromPathRef.current(path, configRef.current);
     } else {
       return undefined;
     }
-  }, [extractPathFromURL]);
+  }, []);
+
+  const isPopstateAction = React.useRef(false);
+  const pathHistory = React.useRef<string[]>([]);
 
   React.useEffect(() => {
-    const listener = ({ url }: { url: string }) => {
-      const path = extractPathFromURL(url);
-      const navigation = ref.current;
+    window.addEventListener('popstate', () => {
+      const path = location.pathname + location.search;
 
-      if (navigation && path) {
-        const state = getStateFromPathRef.current(path, configRef.current);
+      isPopstateAction.current = true;
 
-        if (state) {
-          const action = getActionFromState(state);
+      if (pathHistory.current[pathHistory.current.length - 2] === path) {
+        pathHistory.current.pop();
+        ref.current?.goBack();
+      } else {
+        const state = history.state || getStateFromPathRef.current(path);
 
-          if (action.type === 'RESET_ROOT') {
-            navigation.resetRoot(action.payload);
-          } else {
-            navigation.dispatch(action);
-          }
-        }
+        ref.current?.resetRoot(state);
       }
-    };
+    });
+  }, [ref]);
 
-    Linking.addEventListener('url', listener);
+  React.useEffect(() => {
+    if (!pathHistory.current.length) {
+      pathHistory.current.push(location.pathname + location.search);
+    }
 
-    return () => Linking.removeEventListener('url', listener);
-  }, [extractPathFromURL, ref]);
+    const unsubscribe = ref.current?.addListener('state', e => {
+      if (isPopstateAction.current) {
+        isPopstateAction.current = false;
+        return;
+      }
+
+      const state = ref.current?.getRootState();
+      const path = getPathFromStateRef.current(state, configRef.current);
+
+      if (pathHistory.current[pathHistory.current.length - 2] === path) {
+        pathHistory.current.pop();
+        history.replaceState(e.data.state, '', path);
+        return;
+      }
+
+      if (path !== location.pathname + location.search) {
+        pathHistory.current.push(path);
+        history.pushState(e.data.state, '', path);
+      } else {
+        history.replaceState(e.data.state, '', path);
+      }
+    });
+
+    return unsubscribe;
+  });
 
   return {
     getInitialState,

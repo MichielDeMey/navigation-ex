@@ -105,6 +105,19 @@ export default function App() {
   const { getInitialState } = useLinking(containerRef, {
     prefixes: LinkingPrefixes,
     config: {
+      Article: {
+        path: 'article/:author',
+        parse: {
+          author: author =>
+            author.replace(/-/g, ' ').replace(/^\w/, c => c.toUpperCase()),
+        },
+        stringify: {
+          author: (author: string) => author.toLowerCase().replace(/\s+/, '-'),
+        },
+      },
+      Album: 'album',
+      Chat: 'chat',
+      Contacts: 'contacts',
       Root: Object.keys(SCREENS).reduce<{ [key: string]: string }>(
         (acc, name) => {
           // Convert screen names such as SimpleStack to kebab case (simple-stack)
@@ -132,7 +145,7 @@ export default function App() {
       try {
         let state = await getInitialState();
 
-        if (state === undefined) {
+        if (Platform.OS !== 'web' && state === undefined) {
           const savedState = await AsyncStorage.getItem(
             NAVIGATION_PERSISTENCE_KEY
           );
