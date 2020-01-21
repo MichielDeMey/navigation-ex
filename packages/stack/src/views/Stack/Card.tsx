@@ -463,7 +463,7 @@ export default class Card extends React.Component<Props> {
         ) : null}
         <Animated.View
           style={[styles.container, containerStyle, customContainerStyle]}
-          pointerEvents={ overlayEnabled ? 'auto' : 'box-none' }
+          pointerEvents={overlayEnabled ? 'auto' : 'box-none'}
         >
           <PanGestureHandler
             ref={this.gestureRef}
